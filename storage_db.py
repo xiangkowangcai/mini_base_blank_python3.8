@@ -372,6 +372,92 @@ class Storage(object):
     def getFieldList(self):
         return self.field_name_list
 
+    def delete_row_by_keyword(self, field_name, keyword):
+        """
+        根据字段名和关键字删除行
+        :param field_name: 字段名
+        :param keyword: 关键字
+        :return: 是否删除成功
+        """
+        # 获取字段索引
+        field_names = [field[0].decode('utf-8').strip() if isinstance(field[0], bytes) else field[0].strip() 
+                      for field in self.field_name_list]
+        if field_name not in field_names:
+            print(f"字段 {field_name} 不存在")
+            return False
+        
+        field_idx = field_names.index(field_name)
+        
+        # 查找匹配的记录
+        records_to_delete = []
+        for i, record in enumerate(self.record_list):
+            record_value = record[field_idx]
+            if isinstance(record_value, bytes):
+                record_value = record_value.decode('utf-8')
+            if str(record_value).strip() == keyword.strip():
+                records_to_delete.append(i)
+        
+        if not records_to_delete:
+            print(f"未找到匹配的记录")
+            return False
+        
+        # 删除记录
+        for i in sorted(records_to_delete, reverse=True):
+            del self.record_list[i]
+        
+        # 更新文件
+        self.f_handle.seek(0)
+        self.dir_buf = ctypes.create_string_buffer(BLOCK_SIZE)
+        struct.pack_into('!iii', self.dir_buf, 0, 0, 1, self.num_of_fields)
+        
+        # 写入字段信息
+        beginIndex = struct.calcsize('!iii')
+        for field in self.field_name_list:
+            struct.pack_into('!10sii', self.dir_buf, beginIndex, field[0], field[1], field[2])
+            beginIndex += struct.calcsize('!10sii')
+        
+        # 写入数据块
+        data_buf = ctypes.create_string_buffer(BLOCK_SIZE)
+        struct.pack_into('!ii', data_buf, 0, 1, len(self.record_list))
+        
+        # 计算记录偏移量
+        record_head_len = struct.calcsize('!ii10s')
+        record_content_len = sum(map(lambda x: x[2], self.field_name_list))
+        offset = struct.calcsize('!ii') + len(self.record_list) * struct.calcsize('!i')
+        
+        # 写入记录偏移量
+        for i in range(len(self.record_list)):
+            struct.pack_into('!i', data_buf, struct.calcsize('!ii') + i * struct.calcsize('!i'), offset)
+            offset += record_head_len + record_content_len
+        
+        # 写入记录内容
+        for i, record in enumerate(self.record_list):
+            record_data = b''
+            for value in record:
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                elif isinstance(value, int):
+                    value = str(value).encode('utf-8')
+                elif isinstance(value, bool):
+                    value = str(value).encode('utf-8')
+                record_data += value.ljust(10)[:10]  # 确保每个字段都是10字节
+            
+            struct.pack_into('!ii10s' + str(record_content_len) + 's', 
+                           data_buf, 
+                           struct.calcsize('!ii') + len(self.record_list) * struct.calcsize('!i') + i * (record_head_len + record_content_len),
+                           0,  # block_id
+                           record_head_len + record_content_len,  # record length
+                           b'0',  # timestamp
+                           record_data)
+        
+        # 写入文件
+        self.f_handle.write(self.dir_buf)
+        self.f_handle.write(data_buf)
+        self.f_handle.flush()
+        
+        print(f"成功删除 {len(records_to_delete)} 条记录")
+        return True
+
     # ----------------------------------------
     # destructor
     # ------------------------------------------------
