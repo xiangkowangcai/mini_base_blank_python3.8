@@ -19,6 +19,7 @@ import query_plan_db  # for SQL clause of which data is stored in binary format
 import lex_db  # for lex, where data is stored in binary format
 import parser_db  # for parser
 import common_db  # the global variables, functions, constants in the program
+from log_manager import LogManager
 
 PROMPT_STR = 'Input your choice  \n1:add a new table structure and data \n2:delete a table structure and data\
 \n3:view a table structure and data \n4:delete all tables and data \n5:select from where clause\
@@ -29,9 +30,13 @@ PROMPT_STR = 'Input your choice  \n1:add a new table structure and data \n2:dele
 # the main loop, which needs further implementation
 # ---------------------------
 
+
 def main():
     # main loops for the whole program
     print('main function begins to execute')
+
+    log_mgr = LogManager(dirname='logs')   # 新增：日志目录
+    txn_id = 1  # 新增：事务ID
 
     # The instance data of table is stored in binary format, which corresponds to chapter 2-8 of textbook
 
@@ -40,6 +45,18 @@ def main():
     choice = input(PROMPT_STR)
 
     while True:
+        if choice.upper() == 'BEGIN':
+            log_mgr.begin(txn_id)
+            print(f"事务 {txn_id} 开始。")
+            choice = input(PROMPT_STR)
+            continue
+
+        if choice.upper() == 'COMMIT':
+            log_mgr.commit(txn_id)
+            print(f"事务 {txn_id} 提交。")
+            txn_id += 1
+            choice = input(PROMPT_STR)
+            continue
 
         if choice == '1':  # add a new table and lines of data
             tableName = input('please enter your new table name:')
@@ -49,13 +66,13 @@ def main():
             insertFieldList = []
             if tableName.strip() not in schemaObj.get_table_name_list():
                 # Create a new table
-                dataObj = storage_db.Storage(tableName)
+                dataObj = storage_db.Storage(tableName, log_mgr)  # 传入 log_mgr
 
                 insertFieldList = dataObj.getFieldList()
 
                 schemaObj.appendTable(tableName, insertFieldList)  # add the table structure
             else:
-                dataObj = storage_db.Storage(tableName)
+                dataObj = storage_db.Storage(tableName, log_mgr)  # 传入 log_mgr
 
                 # to the students: The following needs to be further implemented (many lines can be added)
                 record = []
@@ -65,7 +82,7 @@ def main():
                         ' field maximum length is: ' + str(x[2]) + '\n'
                     record.append(input(s))
 
-                if dataObj.insert_record(record):  # add a row
+                if dataObj.insert_record(record, txn_id):  # 传入 txn_id  # add a row
                     print('OK!')
                 else:
                     print('Wrong input!')
@@ -82,7 +99,7 @@ def main():
             if schemaObj.find_table(table_name.strip()):
                 if schemaObj.delete_table_schema(
                         table_name):  # delete the schema from the schema file
-                    dataObj = storage_db.Storage(table_name)  # create an object for the data of table
+                    dataObj = storage_db.Storage(table_name, log_mgr)  # 传入 log_mgr  # create an object for the data of table
                     dataObj.delete_table_data(table_name.strip())  # delete table content from the table file
                     del dataObj
 
@@ -92,7 +109,6 @@ def main():
 
             else:
                 print('there is no table ' + table_name.decode('utf-8') + ' in the schema file')
-
 
             choice = input(PROMPT_STR)
 
@@ -106,7 +122,7 @@ def main():
                 if schemaObj.find_table(table_name.strip()):
                     schemaObj.viewTableStructure(table_name)  # to be implemented
 
-                    dataObj = storage_db.Storage(table_name)  # create an object for the data of table
+                    dataObj = storage_db.Storage(table_name, log_mgr)  # 传入 log_mgr # create an object for the data of table
                     dataObj.show_table_data()  # view all the data of the table
                     del dataObj
                 else:
@@ -122,7 +138,7 @@ def main():
                 table_name.strip()
 
                 if table_name:
-                    stObj = storage_db.Storage(table_name)
+                    stObj = storage_db.Storage(table_name, log_mgr)
                     stObj.delete_table_data(table_name.strip())  # delete table data
                     del stObj
 
@@ -164,8 +180,8 @@ def main():
             if isinstance(table_name, str):
                 table_name = table_name.encode('utf-8')
             field_name, keyword = input('please input the field name and the corresponding keyword (fieldname:keyword):').split(':') # split the input into field name and keyword
-            dataObj = storage_db.Storage(table_name)
-            if dataObj.delete_row_by_keyword(field_name, keyword):
+            dataObj = storage_db.Storage(table_name, log_mgr)  # 传入 log_mgr
+            if dataObj.delete_row_by_keyword(field_name, keyword, txn_id):  # 传入 txn_id
                 print('Row deleted successfully.')
             else:
                 print('No matching row found.')
@@ -180,8 +196,8 @@ def main():
             old_value = input('please input the old value of the field:')  # old field value
             
             new_value = input('please input the new value of the field:') # new field value
-            dataObj = storage_db.Storage(table_name) 
-            if dataObj.update_row_by_keyword(field_name, old_value, new_value):
+            dataObj = storage_db.Storage(table_name, log_mgr)  # 传入 log_mgr
+            if dataObj.update_row_by_keyword(field_name, old_value, new_value, txn_id):  # 传入 txn_id
                 print('Row updated successfully.')
             else:
                 print('No matching row found.')

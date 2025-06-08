@@ -59,7 +59,7 @@ from common_db import BLOCK_SIZE
 import struct
 import os
 import ctypes
-
+from log_manager import LogManager # Import the LogManager for transaction logging
 
 # --------------------------------------------
 # the class can store table data into files
@@ -73,12 +73,14 @@ class Storage(object):
     # input:
     #       tablename
     # -------------------------------------
-    def __init__(self, tablename):
+    def __init__(self, tablename,log_mgr: LogManager = None):
         # print "__init__ of ",Storage.__name__,"begins to execute"
         self.tablename = tablename.strip()
         self.record_list = []
         self.record_Position = []
         self.open = False
+
+        self.log_mgr = log_mgr
 
         if isinstance(self.tablename, bytes):
             tablename_str = self.tablename.decode('utf-8')
@@ -239,7 +241,7 @@ class Storage(object):
     # param insert_record: list
     # return: True or False
     # -------------------------------
-    def insert_record(self, insert_record):
+    def insert_record(self, insert_record,txn_id=None):
 
         # example: ['xuyidan','23','123456']
 
@@ -321,6 +323,13 @@ class Storage(object):
         self.buf = ctypes.create_string_buffer(record_len)
         struct.pack_into('!ii10s', self.buf, 0, record_schema_address, record_content_len, update_time.encode('utf-8'))
         struct.pack_into('!' + str(record_content_len) + 's', self.buf, record_head_len, inputstr.encode('utf-8'))
+
+        # --- WAL 日志写入 ---
+        if self.log_mgr and txn_id is not None:
+            block_id = last_Position[0]
+            self.log_mgr.write_after(txn_id, block_id, self.buf.raw)
+        # --- end ---
+
         self.f_handle.write(self.buf.raw)
         self.f_handle.flush()
 
@@ -372,7 +381,7 @@ class Storage(object):
     def getFieldList(self):
         return self.field_name_list
 
-    def delete_row_by_keyword(self, field_name, keyword):
+    def delete_row_by_keyword(self, field_name, keyword,txn_id=None):
         """
         根据字段名和关键字删除行
         :param field_name: 字段名
@@ -404,7 +413,7 @@ class Storage(object):
         # 删除记录
         for i in sorted(records_to_delete, reverse=True):
             del self.record_list[i]
-        
+
         # 更新文件
         self.f_handle.seek(0)
         self.dir_buf = ctypes.create_string_buffer(BLOCK_SIZE)
@@ -451,14 +460,18 @@ class Storage(object):
                            record_data)
         
         # 写入文件
+        # --- WAL 日志写入 ---
+        if self.log_mgr and txn_id is not None:
+            self.log_mgr.write_before(txn_id, 1, self.f_handle.read(BLOCK_SIZE))
+            self.log_mgr.write_after(txn_id, 1, data_buf.raw)
+        # --- end ---
         self.f_handle.write(self.dir_buf)
         self.f_handle.write(data_buf)
         self.f_handle.flush()
-        
         print(f"成功删除 {len(records_to_delete)} 条记录")
         return True
 
-    def update_row_by_keyword(self, field_name, old_value, new_value):
+    def update_row_by_keyword(self, field_name, old_value, new_value, txn_id=None):
         """
         根据字段名和旧值更新行
         :param field_name: 字段名
@@ -497,7 +510,7 @@ class Storage(object):
         
         # 更新记录列表
         self.record_list = new_record_list
-        
+
         # 更新文件
         self.f_handle.seek(0)
         self.dir_buf = ctypes.create_string_buffer(BLOCK_SIZE)
@@ -542,12 +555,16 @@ class Storage(object):
                            record_head_len + record_content_len,  # record length
                            b'0',  # timestamp
                            record_data)
-        
-        # 写入文件
+         # 写入文件
+        # --- WAL 日志写入 ---
+        if self.log_mgr and txn_id is not None:
+            # 假设只更新第一个匹配的 block
+            self.log_mgr.write_before(txn_id, 1, self.f_handle.read(BLOCK_SIZE))
+            self.log_mgr.write_after(txn_id, 1, data_buf.raw)
+        # --- end ---
         self.f_handle.write(self.dir_buf)
         self.f_handle.write(data_buf)
         self.f_handle.flush()
-        
         print(f"成功更新 {records_updated} 条记录")
         return True
 
