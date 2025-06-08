@@ -1,0 +1,22 @@
+@startuml
+actor 顾客
+participant 预订服务
+participant 餐厅
+participant 餐桌
+
+顾客 -> 预订服务: 发起预订(人数, 预订时间)
+activate 预订服务
+预订服务 -> 餐厅: 获取可用餐桌(预订时间)
+activate 餐厅
+loop 遍历餐厅的每张餐桌
+    餐厅 -> 餐桌: 是否可用(预订时间)
+    activate 餐桌
+    餐桌 --> 餐厅: 返回是否可用
+    deactivate 餐桌
+end
+餐厅 --> 预订服务: 可用餐桌列表
+deactivate 餐厅
+预订服务 -> 预订服务: 创建预订（设置人数、预订时间等）
+预订服务 --> 顾客: 预订成功确认
+deactivate 预订服务
+@enduml    
